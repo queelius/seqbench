@@ -1,8 +1,10 @@
 #include "test_util.hpp"
 #include <torch/torch.h>
 #include "seqbench/corpus.hpp"
+#include "seqbench/metric.hpp"
 #include "fast_weights_model.hpp"
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 static void test_torch_works() {
@@ -63,11 +65,45 @@ static void test_overfit_tiny() {
   CHECK(last < 1.0);  // memorized the period-3 pattern
 }
 
+// The online adapter must reproduce the batched-forward bits for positions 1..T-1.
+static void test_train_eval_consistency() {
+  torch::manual_seed(3);
+  fw::Config c; c.d = 24; c.beta = 1.0; c.lambda = 0.99;
+  fw::FastWeights model(c);
+  model->eval();
+  const int T = 40;
+  std::vector<int64_t> buf(T);
+  for (int i = 0; i < T; ++i) buf[i] = (i * 37 + 11) % 256;
+
+  double train_bits = 0.0;
+  {
+    torch::NoGradGuard ng;
+    auto x = torch::tensor(buf, torch::kLong).reshape({1, T});
+    auto logits = model->forward(x);
+    auto logp = torch::log_softmax(logits.slice(1, 0, T - 1).reshape({-1, 256}), 1).contiguous();
+    auto a = logp.accessor<float, 2>();
+    for (int t = 0; t < T - 1; ++t)
+      train_bits += -double(a[t][buf[t + 1]]) / std::log(2.0);
+  }
+
+  double eval_bits = 0.0;
+  fw::FastWeightsEval ev(model, c);
+  float logits[256];
+  for (int i = 0; i < T; ++i) {
+    ev.predict(logits);
+    if (i >= 1) eval_bits += seqbench::logit_bits(logits, static_cast<uint8_t>(buf[i]));
+    ev.observe(static_cast<uint8_t>(buf[i]));
+  }
+  std::printf("    [consistency train_bits=%.4f eval_bits=%.4f]\n", train_bits, eval_bits);
+  CHECK_NEAR(train_bits, eval_bits, 0.05 * (T - 1));  // < 0.05 bits/byte average drift
+}
+
 int main() {
   RUN(test_torch_works);
   RUN(test_bench_links);
   RUN(test_forward_shape_finite);
   RUN(test_deterministic);
   RUN(test_overfit_tiny);
+  RUN(test_train_eval_consistency);
   return test_summary();
 }

@@ -48,4 +48,33 @@ torch::Tensor bpb_loss(FastWeights model, torch::Tensor x_bt) {
   return ce / std::log(2.0);                                   // bits per byte
 }
 
+FastWeightsEval::FastWeightsEval(FastWeights model, const Config& c)
+    : model_(model), cfg_(c) {
+  model_->eval();
+  W_ = torch::zeros({cfg_.d, cfg_.d});
+  o_ = torch::zeros({cfg_.d});
+}
+
+void FastWeightsEval::predict(float logits[256]) {
+  torch::NoGradGuard ng;
+  auto in = seen_ ? o_ : torch::zeros({cfg_.d});
+  auto out = model_->readout->forward(in).contiguous();  // [256]
+  float* p = out.data_ptr<float>();
+  for (int c = 0; c < 256; ++c) logits[c] = p[c];
+}
+
+void FastWeightsEval::observe(uint8_t b) {
+  torch::NoGradGuard ng;
+  auto idx = torch::tensor({static_cast<int64_t>(b)}, torch::kLong);
+  auto x = model_->emb->forward(idx).squeeze(0);  // [d]
+  auto k = F::normalize(model_->wk->forward(x), F::NormalizeFuncOptions().dim(0));  // [d]
+  auto v = model_->wv->forward(x);                // [d]
+  auto q = model_->wq->forward(x);                // [d]
+  auto Wk = torch::mv(W_, k);                      // [d]
+  auto e = v - Wk;                                 // [d]
+  W_ = cfg_.lambda * W_ + cfg_.beta * torch::outer(e, k);  // [d,d]
+  o_ = torch::mv(W_, q);                            // [d]
+  seen_ = true;
+}
+
 }  // namespace fw
