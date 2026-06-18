@@ -23,7 +23,7 @@ static void test_context_fails_parity() {
 
 // An order>=1 context model captures a clear fraction of induction structure.
 static void test_context_captures_induction() {
-  Diagnostic d = make_induction(7, 8000, 16);
+  Diagnostic d = make_induction(7, 50000, 16);
   auto m1 = make_context_model(1);
   DiagResult r1 = score_diagnostic(*m1, d);
   CHECK(r1.fraction_captured > 0.3);  // captures real structure
