@@ -37,8 +37,36 @@ make data/enwik8
 
 Each run appends a `fast-weights-learned` record to `runs/results.jsonl`. Whether the
 learned layer beats the context-model and gradient-free baselines is read off from those
-records; it is the research question, not an assertion. Note: the diagnostics
-(`induction_fraction`, `parity_fraction`) reflect the trained model's frozen projections
-applied online to those streams, so they are only meaningful for a model trained on a
-representative corpus (enwik8), not the tiny toy smoke run.
+records; it is the research question, not an assertion.
+
+## Results (first enwik8 run, 2026-06-18)
+
+Single layer, `d=128`, `seq_len=256`, `batch=32`, 10,000 Adam steps (~2.3h CPU).
+
+| Model | enwik8 val bpb |
+|-------|----------------|
+| context order-0 | 5.11 |
+| context order-1 | 3.91 |
+| **learned fast-weights (1 layer, d=128, 10k)** | **3.53** |
+| context order-2 | 3.31 (best n-gram) |
+| context order-3 | 3.37 |
+| context order-4 | 3.92 |
+
+Findings:
+
+- **bpb is modest.** The learned layer lands between order-1 and order-2: it beats the
+  low-order n-grams but does not beat the best simple context model (order-2, 3.31), and
+  the val curve plateaued (3.72 -> 3.53 over 10k steps). A single ungated fast-weights
+  layer is underpowered; the bet "learned beats fixed random features" held (the
+  gradient-free version was only an order-1-ish soft-bigram), but "single learned layer
+  beats the n-gram baseline" did not at this scale. Likely needs more capacity (larger
+  `d`, stacked layers, learned beta/lambda gates) and/or more training.
+- **The diagnostics are out-of-distribution for a text-trained model.** `induction` uses
+  bytes 0-15 and `parity` uses bytes 0/1; those are only ~1.1% of enwik8. An
+  enwik8-trained model has essentially never seen them, so its `induction_fraction=0` /
+  `parity_fraction=0` are OOV artifacts, not evidence about whether learned fast-weights
+  can recall or track state. To test a trained model fairly, the diagnostics must use
+  in-distribution bytes (common ASCII), or the model must be trained on the diagnostic
+  distribution. This is a bench-methodology fix for the next iteration.
+
 
