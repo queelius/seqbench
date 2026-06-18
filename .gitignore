@@ -1,0 +1,13 @@
+# Build artifacts
+*.o
+*.a
+/build/
+/bin/
+
+# Fetched corpus (large; not checked in)
+/data/
+
+# Editor / OS cruft
+*.swp
+*~
+.DS_Store
