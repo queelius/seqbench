@@ -71,21 +71,26 @@ Fixed, seeded-random slow weights (NOT learned in this version):
 
 Per the bench's predict/observe contract:
 
-- **`observe(b)`**:
-  - `k = key(b)` (see key_width below; for key_width = 1, `k = E[b]`)
-  - `v = V[b]`
-  - error against the current memory: `e = v - W k`
-  - delta-rule update with decay: `W <- lambda * W + beta * e * k^T`
+- **`observe(b)`** (b is the byte that followed the current context):
+  - if `history` is non-empty (there is a preceding context):
+    - `k = key(history)` (the key of the context that PRECEDES b)
+    - `v = V[b]`
+    - error against the current memory: `e = v - W k`
+    - delta-rule update with decay: `W <- lambda * W + beta * e * k^T`
   - push `b` into `history`, keeping only the last `key_width` bytes
 - **`predict(logits)`**:
   - if `history` is empty: fill all 256 logits with 0 (uniform, the bench's 8-bpb floor)
   - else: `q = key(history)`, `y = W q`, and `logits[c] = <y, V[c]>` for every byte c
     (equivalently `logits = V y`)
 
-For `key_width = 1`, `k = E[b]` in observe and `q = E[last byte]` in predict. For
-`key_width > 1`, `key(...)` normalizes the sum of the embeddings of the relevant recent
-bytes (in observe, the window ending at the just-arrived `b`; in predict, the window of
-bytes observed so far).
+The stored association is `key(context) -> V[next byte]`: in `observe`, `k` is computed
+from the history BEFORE `b` is pushed and `v = V[b]`, so the model learns "this context is
+followed by this byte"; `predict` queries with `key(history)` to recall the value of the
+byte that has historically followed the current context. For `key_width = 1` this means
+`observe(b)` stores `E[previous byte] -> V[b]` (a bigram association in embedding space) and
+`predict` uses `q = E[last observed byte]`. For `key_width > 1`, `key(...)` normalizes the
+sum of the embeddings of the bytes in the window. The first observed byte has no preceding
+context, so it triggers no update.
 
 ### Why a fixed, tied readout works without training
 
