@@ -14,7 +14,7 @@ static void test_context_on_toy() {
   double b3 = run_adaptive(*make_context_model(3), toy).bpb();
   CHECK(b0 > 0.0);
   CHECK(b0 <= 8.0);
-  CHECK(b3 < b0);  // memory helps on the repetitive toy text
+  CHECK(b3 < b0 - 0.5);  // order-3 beats order-0 by a clear margin on repeated text
 }
 
 // enwik8 is optional: skip if not fetched, so `make test` runs offline.

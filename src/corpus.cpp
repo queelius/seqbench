@@ -51,19 +51,21 @@ ByteSpan Corpus::test() const {
 }
 
 ByteSpan toy_corpus() {
-  // Deterministic, structured text so order>0 can beat order-0.
-  // The pattern "ABC" repeats many times. After context "AB", the next byte is
-  // deterministically "C". After seeing enough repetitions, order-1 or order-2
-  // beats order-0 because the context strongly predicts the next byte.
-  static const char kText[] =
-      "ABCABCABCABCABCABCABCABCABCABCABCABC"
-      "ABCABCABCABCABCABCABCABCABCABCABCABC"
-      "ABCABCABCABCABCABCABCABCABCABCABCABC"
-      "ABCABCABCABCABCABCABCABCABCABCABCABC"
-      "ABCABCABCABCABCABCABCABCABCABCABCABC"
-      "ABCABCABCABCABCABCABCABCABCABCABCABC\n";
-  return ByteSpan{reinterpret_cast<const uint8_t*>(kText),
-                  sizeof(kText) - 1};
+  // Deterministic realistic ASCII, long enough that order-3 contexts warm up
+  // and clearly beat order-0. A varied English block is repeated many times so
+  // its trigrams recur; the static buffer is built once, so the returned
+  // pointer and length are stable across calls.
+  static const std::string text = [] {
+    const std::string block =
+        "the quick brown fox jumps over the lazy dog. "
+        "pack my box with five dozen liquor jugs. "
+        "how vexingly quick daft zebras jump! ";
+    std::string s;
+    s.reserve(block.size() * 40);
+    for (int i = 0; i < 40; ++i) s += block;
+    return s;
+  }();
+  return ByteSpan{reinterpret_cast<const uint8_t*>(text.data()), text.size()};
 }
 
 }  // namespace seqbench
