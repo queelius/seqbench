@@ -1,5 +1,8 @@
 #include "seqbench/metric.hpp"
+#include <chrono>
 #include <cmath>
+#include <stdexcept>
+#include <string>
 
 namespace seqbench {
 
@@ -23,6 +26,35 @@ void Kahan::add(double x) {
   double t = sum + y;
   c = (t - sum) - y;
   sum = t;
+}
+
+namespace {
+BpbResult score_stream(Model& m, ByteSpan data) {
+  Kahan bits;
+  float logits[256];
+  auto t0 = std::chrono::steady_clock::now();
+  for (std::size_t i = 0; i < data.len; ++i) {
+    m.predict(logits);
+    if (!logits_finite(logits))
+      throw std::runtime_error("non-finite logits at position " +
+                               std::to_string(i));
+    bits.add(logit_bits(logits, data[i]));
+    m.observe(data[i]);
+  }
+  auto t1 = std::chrono::steady_clock::now();
+  BpbResult r;
+  r.total_bits = bits.value();
+  r.n_bytes = data.len;
+  r.seconds = std::chrono::duration<double>(t1 - t0).count();
+  return r;
+}
+}  // namespace
+
+BpbResult run_adaptive(Model& m, ByteSpan data) { return score_stream(m, data); }
+
+BpbResult run_train_test(Model& m, ByteSpan train, ByteSpan val) {
+  m.train(train);
+  return score_stream(m, val);
 }
 
 }  // namespace seqbench
