@@ -4,6 +4,11 @@
 /build/
 /bin/
 
+# Compiled test and tool binaries (the Makefile builds them in-place)
+/tests/*_test
+/tools/bench
+/tools/sweep_cli
+
 # Fetched corpus (large; not checked in)
 /data/
 
