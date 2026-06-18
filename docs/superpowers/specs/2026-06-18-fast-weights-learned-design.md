@@ -115,10 +115,13 @@ The best checkpoint is wrapped as a bench `Model`:
   (a learned prior for the very first byte). Copied into the `float logits[256]` the contract
   expects.
 
-This online recurrence is identical to the training forward, so the streaming eval bpb
-matches the batched training bpb on the same data (verified by a test). The wrapped model is
-scored by the bench: enwik8 val bits-per-byte (`run_adaptive`), the induction and parity
-diagnostics (`score_diagnostic`). The runner emits a `RunRecord`:
+This online recurrence is identical to the training forward, so the online eval bits match
+the batched training bits on the same short sequence (verified by a test). The runner reports
+enwik8-val bits-per-byte via the **batched chunked forward** (the same regime the model was
+trained in; the decay `lambda` keeps the chunked number close to a fully-streaming one, and
+it avoids millions of per-byte libtorch dispatches over the 5 MB val split). The induction
+and parity diagnostics are small streams, so they are scored with the **online eval adapter**
+through `score_diagnostic`. The runner emits a `RunRecord`:
 
 ```json
 {"arch":"fast-weights-learned","version":"v1-deltanet",...,
