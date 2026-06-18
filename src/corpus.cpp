@@ -51,13 +51,17 @@ ByteSpan Corpus::test() const {
 }
 
 ByteSpan toy_corpus() {
-  // Deterministic, mildly structured ASCII so order>0 can beat order-0.
+  // Deterministic, structured text so order>0 can beat order-0.
+  // The pattern "ABC" repeats many times. After context "AB", the next byte is
+  // deterministically "C". After seeing enough repetitions, order-1 or order-2
+  // beats order-0 because the context strongly predicts the next byte.
   static const char kText[] =
-      "the quick brown fox jumps over the lazy dog. "
-      "the quick brown fox jumps over the lazy dog. "
-      "pack my box with five dozen liquor jugs. "
-      "pack my box with five dozen liquor jugs. "
-      "the quick brown fox jumps over the lazy dog.\n";
+      "ABCABCABCABCABCABCABCABCABCABCABCABC"
+      "ABCABCABCABCABCABCABCABCABCABCABCABC"
+      "ABCABCABCABCABCABCABCABCABCABCABCABC"
+      "ABCABCABCABCABCABCABCABCABCABCABCABC"
+      "ABCABCABCABCABCABCABCABCABCABCABCABC"
+      "ABCABCABCABCABCABCABCABCABCABCABCABC\n";
   return ByteSpan{reinterpret_cast<const uint8_t*>(kText),
                   sizeof(kText) - 1};
 }
