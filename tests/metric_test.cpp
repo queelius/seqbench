@@ -35,6 +35,9 @@ static void test_finiteness() {
   float bad[256]; for (int i = 0; i < 256; ++i) bad[i] = 1.0f;
   bad[3] = std::nanf("");
   CHECK(!logits_finite(bad));
+  float inf[256]; for (int i = 0; i < 256; ++i) inf[i] = 1.0f;
+  inf[5] = INFINITY;
+  CHECK(!logits_finite(inf));
 }
 
 // Kahan keeps a small running value exact across many tiny additions.

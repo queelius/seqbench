@@ -52,6 +52,11 @@ BpbResult score_stream(Model& m, ByteSpan data) {
 
 BpbResult run_adaptive(Model& m, ByteSpan data) { return score_stream(m, data); }
 
+// NOTE: the "adaptive and train/test yield the same bpb" equivalence is only
+// meaningful for a model whose observe() freezes parameters after train().
+// The v1 ContextModel is adaptive-only (train() is a no-op, observe() always
+// updates), so protocol-equivalence is verified once the first two-phase
+// (neural) model that honors the freeze contract is added.
 BpbResult run_train_test(Model& m, ByteSpan train, ByteSpan val) {
   m.train(train);
   return score_stream(m, val);

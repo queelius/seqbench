@@ -22,7 +22,14 @@ int main(int argc, char** argv) {
 
   std::unique_ptr<Model> model;
   if (mspec.rfind("ctx:", 0) == 0) {
-    model = make_context_model(std::atoi(mspec.c_str() + 4));
+    const std::string ord = mspec.substr(4);
+    char* end = nullptr;
+    long n = std::strtol(ord.c_str(), &end, 10);
+    if (ord.empty() || *end != '\0') {
+      std::fprintf(stderr, "invalid order in model spec: %s\n", mspec.c_str());
+      return 2;
+    }
+    model = make_context_model(static_cast<int>(n));
   } else {
     std::fprintf(stderr, "unknown model: %s\n", mspec.c_str());
     usage();

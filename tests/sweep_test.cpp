@@ -9,7 +9,7 @@
 
 using namespace seqbench;
 
-static void test_sweep_monotone_on_toy() {
+static void test_sweep_endpoints_improve_on_toy() {
   std::vector<int> knobs = {0, 1, 2, 3};
   std::vector<SweepPoint> pts =
       run_sweep(make_context_model, knobs, toy_corpus());
@@ -36,7 +36,7 @@ static void test_write_csv() {
 }
 
 int main() {
-  RUN(test_sweep_monotone_on_toy);
+  RUN(test_sweep_endpoints_improve_on_toy);
   RUN(test_write_csv);
   return test_summary();
 }

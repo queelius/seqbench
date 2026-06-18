@@ -15,6 +15,7 @@ struct Rng {
     z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
     return z ^ (z >> 31);
   }
+  // Assumes n is a power of two at all call sites (n=16): zero modulo bias.
   int below(int n) { return int(next() % uint64_t(n)); }
 };
 }  // namespace

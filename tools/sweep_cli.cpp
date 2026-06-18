@@ -21,7 +21,15 @@ int main(int argc, char** argv) {
   std::string cspec = argv[1];
   std::string out = argv[2];
   std::vector<int> knobs;
-  for (int i = 3; i < argc; ++i) knobs.push_back(std::atoi(argv[i]));
+  for (int i = 3; i < argc; ++i) {
+    char* end = nullptr;
+    long n = std::strtol(argv[i], &end, 10);
+    if (*argv[i] == '\0' || *end != '\0') {
+      std::fprintf(stderr, "invalid order argument: %s\n", argv[i]);
+      return 2;
+    }
+    knobs.push_back(static_cast<int>(n));
+  }
 
   std::unique_ptr<Corpus> corpus;
   ByteSpan span;

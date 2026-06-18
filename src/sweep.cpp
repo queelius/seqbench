@@ -21,10 +21,18 @@ std::vector<SweepPoint> run_sweep(
 void write_csv(const std::vector<SweepPoint>& pts, const std::string& path) {
   std::FILE* f = std::fopen(path.c_str(), "w");
   if (!f) throw std::runtime_error("write_csv: cannot open " + path);
-  std::fprintf(f, "knob,bpb,seconds\n");
-  for (const SweepPoint& p : pts)
-    std::fprintf(f, "%d,%.6f,%.6f\n", p.knob, p.bpb, p.seconds);
-  std::fclose(f);
+  if (std::fprintf(f, "knob,bpb,seconds\n") < 0) {
+    std::fclose(f);
+    throw std::runtime_error("write_csv: write failed for " + path);
+  }
+  for (const SweepPoint& p : pts) {
+    if (std::fprintf(f, "%d,%.6f,%.6f\n", p.knob, p.bpb, p.seconds) < 0) {
+      std::fclose(f);
+      throw std::runtime_error("write_csv: write failed for " + path);
+    }
+  }
+  if (std::fclose(f) != 0)
+    throw std::runtime_error("write_csv: close failed for " + path);
 }
 
 }  // namespace seqbench
