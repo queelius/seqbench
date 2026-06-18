@@ -30,7 +30,7 @@ static void test_higher_order_beats_order0_on_periodic() {
   double b0 = run_adaptive(m0, data).bpb();
   double b1 = run_adaptive(m1, data).bpb();
   CHECK(b1 < b0);
-  CHECK(b1 < 1.0);  // order-1 nearly predicts the period
+  CHECK(b1 < 0.75);  // order-1 nearly predicts the period (measured ~0.57 bpb)
 }
 
 static void test_factory() {
