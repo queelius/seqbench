@@ -23,3 +23,7 @@ target_include_directories(bench_core PUBLIC ${BENCH_ROOT}/include)
 add_executable(gru_test gru_test.cpp gru_model.cpp)
 target_include_directories(gru_test PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/tests ${BENCH_ROOT}/arch ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(gru_test bench_core "${TORCH_LIBRARIES}")
+
+add_executable(train_gru train_gru.cpp gru_model.cpp)
+target_include_directories(train_gru PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/arch ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(train_gru bench_core "${TORCH_LIBRARIES}")
