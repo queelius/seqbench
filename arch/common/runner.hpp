@@ -137,6 +137,12 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
   rec.results["train_bpb"] = train_bpb;
 
   if (is_task) {
+    if (rc.task == "parity") {
+      rec.config["block_len"] = JsonValue::n(rc.block_len);
+    } else {
+      rec.config["dict_size"] = JsonValue::n(rc.dict_size);
+      rec.config["key_len"] = JsonValue::n(rc.key_len);
+    }
     Diagnostic test = (rc.task == "parity")
         ? make_parity(rc.seed ^ 0x5eedULL, 4000, rc.block_len)
         : make_induction(rc.seed ^ 0x5eedULL, 400, 51, rc.dict_size, rc.key_len);

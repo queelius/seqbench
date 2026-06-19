@@ -46,6 +46,25 @@ Fraction-captured on the train-on-task probes (0 = marginal, 1 = entropy floor):
   fixed-size hidden state is a weaker content-addressed memory than fast-weights' explicit
   d x d matrix memory, so fast-weights remains the best recall architecture here.
 
-Open: getting an architecture to actually LEARN parity (curriculum, much longer training,
-higher learning rate, or a recurrence with an inductive bias toward bounded counters) is
-the next state-tracking question; fast-weights remains the recall winner.
+## Parity learnability (block-length sweep, 2026-06-19, d=64, 5000 steps, lr 1e-3)
+
+To separate "can the GRU represent parity" from "can SGD learn it", parity was swept by
+XOR-window length `block_len`:
+
+| block_len | fraction captured | train_bpb |
+|-----------|-------------------|-----------|
+| 2  | 0.9965 | 0.67 |
+| 4  | 0.1064 | 0.98 |
+| 8  | 0.0000 | 1.00 |
+| 16 | 0.0000 | 1.00 |
+
+The GRU learns 2-bit parity almost perfectly, so it DOES have the state-tracking inductive
+bias (something fast-weights cannot do at any length, being a linear recurrence). But
+learnability falls off a cliff as the window grows (0.99 -> 0.11 -> 0.00 between block_len 2
+and 8): gradient descent fails to find the parity solution as the credit-assignment horizon
+lengthens. So the two architectures' parity failures are now precisely distinguished:
+fast-weights lacks the representation (flat 0 at every length), the GRU has it but loses the
+optimization with horizon. The bench separated representability from learnability into a
+concrete length threshold. Open next: a curriculum (grow block_len during training) or a
+recurrence biased toward bounded counters, to push the GRU's learnable horizon out;
+fast-weights remains the recall winner.
