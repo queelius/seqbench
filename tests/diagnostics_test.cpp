@@ -1,6 +1,8 @@
 #include "test_util.hpp"
 #include "seqbench/diagnostics.hpp"
 #include "seqbench/context_model.hpp"
+#include <cstdint>
+#include <vector>
 
 using namespace seqbench;
 
@@ -21,20 +23,34 @@ static void test_context_fails_parity() {
   CHECK(r.fraction_captured < 0.1);   // captured ~nothing
 }
 
-// An order>=1 context model captures a clear fraction of induction structure.
-static void test_context_captures_induction() {
-  Diagnostic d = make_induction(7, 50000, 16);
-  auto m1 = make_context_model(1);
-  DiagResult r1 = score_diagnostic(*m1, d);
-  CHECK(r1.fraction_captured > 0.3);  // captures real structure
-  auto m0 = make_context_model(0);
-  DiagResult r0 = score_diagnostic(*m0, d);
-  CHECK(r1.observed_bpb < r0.observed_bpb);  // memory helps
+// In-context induction (fresh per-sequence mapping, 4-byte keys): a finite-order count
+// model cannot do it (it conflates the per-sequence mappings and cannot match full keys).
+static void test_context_fails_incontext_induction() {
+  Diagnostic d = make_induction(7, 400, 51, 16, 4);
+  CHECK(d.naive_bpb >= d.floor_bpb);
+  CHECK(d.floor_bpb > 0.0);
+  auto m = make_context_model(3);
+  DiagResult r = score_diagnostic(*m, d);
+  std::printf("    [in-context induction: context o3 fraction=%.4f]\n", r.fraction_captured);
+  CHECK(r.fraction_captured < 0.30);  // cannot do in-context recall of novel mappings
+}
+
+// Generators are deterministic and the fillers produce exactly T bytes.
+static void test_fillers_deterministic() {
+  std::vector<uint8_t> a(300), b(300), c(300), e(300);
+  fill_parity(42, a.data(), 300, 16);
+  fill_parity(42, b.data(), 300, 16);
+  CHECK(a == b);
+  fill_induction(9, c.data(), 300, 16, 4);
+  fill_induction(9, e.data(), 300, 16, 4);
+  CHECK(c == e);
+  CHECK(c != a);  // different tasks differ
 }
 
 int main() {
   RUN(test_generators_deterministic);
   RUN(test_context_fails_parity);
-  RUN(test_context_captures_induction);
+  RUN(test_context_fails_incontext_induction);
+  RUN(test_fillers_deterministic);
   return test_summary();
 }
