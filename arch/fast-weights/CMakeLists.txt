@@ -26,5 +26,5 @@ target_include_directories(fw_test PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/t
 target_link_libraries(fw_test bench_core "${TORCH_LIBRARIES}")
 
 add_executable(train_fw train_fw.cpp fast_weights_model.cpp)
-target_include_directories(train_fw PRIVATE ${BENCH_ROOT}/include ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(train_fw PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/arch ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(train_fw bench_core "${TORCH_LIBRARIES}")
