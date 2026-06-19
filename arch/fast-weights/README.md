@@ -69,4 +69,30 @@ Findings:
   in-distribution bytes (common ASCII), or the model must be trained on the diagnostic
   distribution. This is a bench-methodology fix for the next iteration.
 
+## Capability results (train-on-task probes, 2026-06-19)
+
+After the diagnostics were reframed as train-on-task probes, fast-weights was trained on
+each task (d=64, 5000 steps) and scored on a held-out test stream. Fraction-captured is the
+share of the recall/state structure the model captured (0 = no better than the marginal,
+1 = the entropy floor).
+
+| Task | context model (best n-gram) | learned fast-weights |
+|------|-----------------------------|----------------------|
+| **induction** (in-context recall) | 0.25 | **0.32** (still improving) |
+| **parity** (state-tracking) | 0.00 | 0.00 |
+
+- **Induction: fast-weights wins.** It captures more in-context recall than any
+  finite-order n-gram (0.32 vs 0.25), its training loss was still dropping at 5000 steps,
+  and the advantage comes from exactly what the n-gram lacks: a content-addressed, decaying
+  memory that re-infers each sequence's fresh mapping instead of conflating mappings in a
+  persistent count table. The "right inductive bias" thesis holds for recall.
+- **Parity: fast-weights fails, like the n-gram.** Its *training* loss never moved off the
+  naive 1.0 (it could not even fit the task), which points to an expressivity/optimization
+  wall, not undertraining. This is consistent with the known limit that a linear recurrence
+  (the delta rule is linear in W) cannot track parity, which needs a non-linear state. A
+  gated or non-linear recurrence would be the architecture to test for state-tracking.
+
+Net: the bench cleanly separated the two capabilities and showed this architecture has the
+recall inductive bias but not the state-tracking one, for a principled reason.
+
 
