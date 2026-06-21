@@ -79,4 +79,43 @@ torch::Tensor bpb_loss(DeltaNet model, torch::Tensor x_bt) {
   return ce / std::log(2.0);
 }
 
+DeltaNetEval::DeltaNetEval(DeltaNet model, const Config& c) : model_(model), cfg_(c) {
+  model_->eval();
+  for (int i = 0; i < cfg_.n_layers; ++i) W_.push_back(torch::zeros({cfg_.d, cfg_.d}));
+  out_ = torch::zeros({cfg_.d});
+}
+
+void DeltaNetEval::predict(float logits[256]) {
+  torch::NoGradGuard ng;
+  auto x = seen_ ? out_ : torch::zeros({cfg_.d});
+  auto o = model_->readout->forward(model_->ln_f->forward(x)).contiguous();  // [256]
+  float* p = o.data_ptr<float>();
+  for (int c = 0; c < 256; ++c) logits[c] = p[c];
+}
+
+void DeltaNetEval::observe(uint8_t b) {
+  torch::NoGradGuard ng;
+  int d = cfg_.d;
+  auto x = model_->emb->forward(torch::tensor({static_cast<int64_t>(b)}, torch::kLong)).view({d});  // [d]
+  for (int i = 0; i < cfg_.n_layers; ++i) {
+    auto& blk = model_->blocks[i];
+    // FWMix on ln1(x), updating W_[i].
+    auto h = blk->ln1->forward(x);                                                      // [d]
+    auto k = F::normalize(blk->mix->wk->forward(h), F::NormalizeFuncOptions().dim(0));  // [d]
+    auto vv = blk->mix->wv->forward(h);                                                 // [d]
+    auto qq = blk->mix->wq->forward(h);                                                 // [d]
+    auto bt = torch::sigmoid(blk->mix->wbeta->forward(h));                              // [1]
+    auto Wk = torch::mv(W_[i], k);                                                      // [d]
+    auto e = vv - Wk;                                                                   // [d]
+    W_[i] = cfg_.lambda * W_[i] + torch::outer(bt * e, k);                              // [d,d]
+    auto o = torch::mv(W_[i], qq);                                                      // [d]
+    x = x + blk->mix->wo->forward(o);                                                   // residual
+    // MLP on ln2(x).
+    auto h2 = blk->ln2->forward(x);
+    x = x + blk->fc2->forward(torch::gelu(blk->fc1->forward(h2)));                      // residual
+  }
+  out_ = x;
+  seen_ = true;
+}
+
 }  // namespace dn

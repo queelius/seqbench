@@ -48,9 +48,40 @@ static void test_overfit_tiny() {
   CHECK(last < 1.0);
 }
 
+static void test_train_eval_consistency() {
+  torch::manual_seed(3);
+  dn::Config c; c.d = 24; c.n_layers = 2;
+  dn::DeltaNet model(c);
+  model->eval();
+  const int T = 40;
+  std::vector<int64_t> buf(T);
+  for (int i = 0; i < T; ++i) buf[i] = (i * 37 + 11) % 256;
+
+  double train_bits = 0.0;
+  {
+    torch::NoGradGuard ng;
+    auto x = torch::tensor(buf, torch::kLong).reshape({1, T});
+    auto logp = torch::log_softmax(model->forward(x).slice(1, 0, T - 1).reshape({-1, 256}), 1).contiguous();
+    auto a = logp.accessor<float, 2>();
+    for (int t = 0; t < T - 1; ++t) train_bits += -double(a[t][buf[t + 1]]) / std::log(2.0);
+  }
+
+  double eval_bits = 0.0;
+  dn::DeltaNetEval ev(model, c);
+  float logits[256];
+  for (int i = 0; i < T; ++i) {
+    ev.predict(logits);
+    if (i >= 1) eval_bits += seqbench::logit_bits(logits, static_cast<uint8_t>(buf[i]));
+    ev.observe(static_cast<uint8_t>(buf[i]));
+  }
+  std::printf("    [deltanet consistency train_bits=%.4f eval_bits=%.4f]\n", train_bits, eval_bits);
+  CHECK_NEAR(train_bits, eval_bits, 0.05 * (T - 1));
+}
+
 int main() {
   RUN(test_forward_shape_finite);
   RUN(test_deterministic);
   RUN(test_overfit_tiny);
+  RUN(test_train_eval_consistency);
   return test_summary();
 }
