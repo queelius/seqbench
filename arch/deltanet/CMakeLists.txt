@@ -23,3 +23,7 @@ target_include_directories(bench_core PUBLIC ${BENCH_ROOT}/include)
 add_executable(deltanet_test deltanet_test.cpp deltanet_model.cpp)
 target_include_directories(deltanet_test PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/tests ${BENCH_ROOT}/arch ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(deltanet_test bench_core "${TORCH_LIBRARIES}")
+
+add_executable(train_deltanet train_deltanet.cpp deltanet_model.cpp)
+target_include_directories(train_deltanet PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/arch ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(train_deltanet bench_core "${TORCH_LIBRARIES}")
