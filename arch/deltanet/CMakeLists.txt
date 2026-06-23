@@ -27,3 +27,7 @@ target_link_libraries(deltanet_test bench_core "${TORCH_LIBRARIES}")
 add_executable(train_deltanet train_deltanet.cpp deltanet_model.cpp)
 target_include_directories(train_deltanet PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/arch ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(train_deltanet bench_core "${TORCH_LIBRARIES}")
+
+add_executable(checkpoint_test ${BENCH_ROOT}/arch/common/checkpoint_test.cpp)
+target_include_directories(checkpoint_test PRIVATE ${BENCH_ROOT}/include ${BENCH_ROOT}/tests ${BENCH_ROOT}/arch)
+target_link_libraries(checkpoint_test bench_core "${TORCH_LIBRARIES}")
