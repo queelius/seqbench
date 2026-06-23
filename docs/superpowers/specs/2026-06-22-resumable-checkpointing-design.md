@@ -197,9 +197,38 @@ libtorch.
   approved design).
 - A general JSON reader (the `.meta` sidecar is line-based key/value).
 
+## GPU enablement (deferred, verify on real hardware)
+
+The CPU path is implemented and tested. The CUDA path is wired (`--device cuda`,
+device-mapped model and batches) but cannot be runtime-verified on the
+development box (no GPU). A whole-branch adversarial review confirmed three
+CUDA-only items to fix and verify the first time a GPU is online. None affects
+the CPU path, and none affects a fresh enwik8 asymptote run on GPU EXCEPT where
+noted:
+
+1. `load_checkpoint` (checkpoint.hpp) loads Adam optimizer state CPU-resident;
+   on a CUDA resume the moment tensors must be moved onto the device before the
+   first `opt.step()`. Needed for resuming a run on GPU.
+2. `save_checkpoint` does not snapshot tensors to CPU before writing, so a
+   checkpoint written on CUDA is not loadable on a CPU-only machine. Add a CPU
+   snapshot on save (or a device arg on the optimizer load) for cross-device
+   portability. Needed for CPU-started, GPU-resumed runs.
+3. The eval adapters (`DeltaNetEval`, `GRUEval`, `FastWeightsEval`) build their
+   recurrent-state and per-step index tensors on CPU with no device awareness,
+   so `--device cuda` combined with `--task parity|induction` crashes at the
+   first adapter forward (device mismatch). Thread `dev` into `make_adapter` and
+   build adapter tensors on `dev`. NOTE: this path is only used for the synthetic
+   task diagnostics; the enwik8 asymptote run uses `eval_val_bpb` (forward-based,
+   no adapter) and is unaffected.
+
+A fresh enwik8 asymptote run on GPU therefore needs only item 1 if it will be
+resumed, and item 2 only for cross-device portability; item 3 is for GPU runs of
+the parity/induction probes.
+
 ## After this lands
 
-Launch the resumable asymptote run:
+Launch the resumable asymptote run (on the GPU box after the items above, or on
+CPU now since the CPU path is complete):
 `train_deltanet --corpus data/enwik8 --d 128 --n-layers 4 --steps 44000 \
   --ckpt-dir runs/ckpt/deltanet-asymptote --ckpt-every 2000`
 Watch the streaming eval bpb, stop at plateau, then move to sub-project 2.
