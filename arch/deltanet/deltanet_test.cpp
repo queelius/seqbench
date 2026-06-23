@@ -2,8 +2,13 @@
 #include <torch/torch.h>
 #include "seqbench/metric.hpp"
 #include "deltanet_model.hpp"
+#include "common/runner.hpp"
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <fstream>
+#include <map>
+#include <random>
 #include <vector>
 
 static void test_forward_shape_finite() {
@@ -78,10 +83,50 @@ static void test_train_eval_consistency() {
   CHECK_NEAR(train_bits, eval_bits, 0.05 * (T - 1));
 }
 
+static void test_run_experiment_resume() {
+  // A tiny deltanet trained on the toy corpus, checkpointing to /tmp, then
+  // resumed to a higher target step count. Verifies run_experiment wires
+  // save + resume correctly (start_step advances, no error, record written).
+  const std::string ckpt = "/tmp/sb_runexp_ckpt";
+  if (std::system(("rm -rf " + ckpt).c_str()) != 0) { /* best-effort cleanup */ }
+  auto make = [&](int steps, bool resume) {
+    archcommon::RunConfig rc;
+    rc.corpus = "toy"; rc.seq_len = 16; rc.batch = 2; rc.steps = steps;
+    rc.eval_every = 2; rc.ckpt_dir = ckpt; rc.ckpt_every = 2; rc.resume = resume;
+    rc.out = "/tmp/sb_runexp.jsonl";
+    dn::Config cfg; cfg.d = 16; cfg.n_layers = 1;
+    std::map<std::string, seqbench::JsonValue> config;
+    config["d"] = seqbench::JsonValue::n(cfg.d);
+    config["n_layers"] = seqbench::JsonValue::n(cfg.n_layers);
+    config["lambda"] = seqbench::JsonValue::n(cfg.lambda);
+    dn::DeltaNet model(cfg);
+    return archcommon::run_experiment<dn::DeltaNet>(
+        rc, "deltanet", "test", config, model,
+        [](dn::DeltaNet& m, torch::Tensor x) { return dn::bpb_loss(m, x); },
+        [cfg](dn::DeltaNet& m) {
+          return std::unique_ptr<seqbench::Model>(new dn::DeltaNetEval(m, cfg));
+        });
+  };
+  int rc1 = make(4, false);
+  CHECK(rc1 == 0);
+  CHECK(archcommon::checkpoint_exists(ckpt, "latest"));
+  archcommon::CkptMeta m1; std::mt19937_64 r;
+  { std::ifstream f(ckpt + "/latest.meta"); std::string k;
+    while (f >> k) { if (k == "step") { f >> m1.step; break; } } }
+  CHECK(m1.step == 4);
+  int rc2 = make(8, true);   // resume to target 8
+  CHECK(rc2 == 0);
+  archcommon::CkptMeta m2;
+  { std::ifstream f(ckpt + "/latest.meta"); std::string k;
+    while (f >> k) { if (k == "step") { f >> m2.step; break; } } }
+  CHECK(m2.step == 8);
+}
+
 int main() {
   RUN(test_forward_shape_finite);
   RUN(test_deterministic);
   RUN(test_overfit_tiny);
   RUN(test_train_eval_consistency);
+  RUN(test_run_experiment_resume);
   return test_summary();
 }

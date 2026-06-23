@@ -4,6 +4,7 @@
 #include "seqbench/diagnostics.hpp"
 #include "seqbench/experiment.hpp"
 #include "seqbench/model.hpp"
+#include "common/checkpoint.hpp"
 #include <cstdio>
 #include <functional>
 #include <limits>
@@ -22,6 +23,9 @@ struct RunConfig {
   std::string corpus = "data/enwik8", task = "enwik8", out = "runs/results.jsonl";
   int block_len = 16, dict_size = 16, key_len = 4;  // task generator params
   std::string device = "cpu";  // "cpu" or "cuda"
+  std::string ckpt_dir = "";   // "" disables checkpointing
+  int ckpt_every = 0;          // 0 means "use eval_every"
+  bool resume = false;
 };
 
 inline seqbench::ByteSpan slice(seqbench::ByteSpan s, double lo, double hi) {
@@ -104,9 +108,42 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
     return tot / val_set.size();
   };
 
-  const std::string best_path = "/tmp/seqbench_best.pt";
+  // Checkpoint plumbing. Fingerprint is arch + sorted structural config, so a
+  // resume into a structurally different model is rejected.
+  std::string fingerprint = arch;
+  for (const auto& kv : config) {
+    fingerprint += "|" + kv.first + "=";
+    fingerprint += (kv.second.type == JsonValue::Number)
+                       ? std::to_string(kv.second.num) : kv.second.str;
+  }
+  const bool ckpt_on = !rc.ckpt_dir.empty();
+  const int ckpt_every = rc.ckpt_every > 0 ? rc.ckpt_every : rc.eval_every;
+  const std::string fallback_best = "/tmp/seqbench_best.pt";
+
   double best = std::numeric_limits<double>::infinity();
-  for (int step = 1; step <= rc.steps; ++step) {
+  int start_step = 1;
+  if (rc.resume && ckpt_on && archcommon::checkpoint_exists(rc.ckpt_dir, "latest")) {
+    archcommon::CkptMeta meta;
+    archcommon::load_checkpoint(rc.ckpt_dir, "latest", model, opt, meta, rng, dev);
+    if (meta.fingerprint != fingerprint) {
+      std::fprintf(stderr, "resume fingerprint mismatch:\n  ckpt:    %s\n  current: %s\n",
+                   meta.fingerprint.c_str(), fingerprint.c_str());
+      return 2;
+    }
+    start_step = meta.step + 1;
+    best = meta.best;
+    std::fprintf(stderr, "resumed from step %d (best_val_bpb=%.4f), target steps=%d\n",
+                 meta.step, best, rc.steps);
+  }
+
+  auto save_latest = [&](int step) {
+    if (!ckpt_on) return;
+    archcommon::CkptMeta m; m.step = step; m.seed = rc.seed; m.best = best;
+    m.arch = arch; m.fingerprint = fingerprint;
+    archcommon::save_checkpoint(rc.ckpt_dir, "latest", model, opt, m, rng);
+  };
+
+  for (int step = start_step; step <= rc.steps; ++step) {
     model->train();
     auto xb = train_batch(rng).to(dev);
     opt.zero_grad();
@@ -118,10 +155,28 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
       bool improved = vbpb < best;
       std::fprintf(stderr, "step %d train_bpb=%.4f val_bpb=%.4f%s\n",
                    step, loss.item().toDouble(), vbpb, improved ? " *" : "");
-      if (improved) { best = vbpb; torch::save(model, best_path); }
+      if (improved) {
+        best = vbpb;
+        if (ckpt_on) {
+          archcommon::CkptMeta m; m.step = step; m.seed = rc.seed; m.best = best;
+          m.arch = arch; m.fingerprint = fingerprint;
+          archcommon::save_checkpoint(rc.ckpt_dir, "best", model, opt, m, rng);
+        } else {
+          torch::save(model, fallback_best);
+        }
+      }
+    }
+    if (ckpt_on && (step % ckpt_every == 0 || step == rc.steps)) save_latest(step);
+  }
+  // Restore best params for the final reported metrics.
+  if (best < std::numeric_limits<double>::infinity()) {
+    if (ckpt_on) {
+      archcommon::CkptMeta m; std::mt19937_64 tmp;
+      archcommon::load_checkpoint(rc.ckpt_dir, "best", model, opt, m, tmp, dev);
+    } else {
+      torch::load(model, fallback_best);
     }
   }
-  if (best < std::numeric_limits<double>::infinity()) torch::load(model, best_path);
 
   double train_bpb;
   { torch::NoGradGuard ng; model->eval();

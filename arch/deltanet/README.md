@@ -25,6 +25,13 @@ Knobs: `--d` (model dim), `--n-layers`, `--lambda`, plus the common
 `--seq-len/--batch/--steps/--lr/--seed`. Records `arch:"deltanet"`. At d=128, n_layers=4 it
 costs about 2.93 s/step on a 12-core CPU.
 
+Long-run flags (shared by all architectures): `--ckpt-dir <dir>` enables
+resumable checkpoints (rolling `latest` plus `best`), `--ckpt-every <n>` sets the
+save cadence (default: the eval interval), `--resume` continues from `<dir>`'s
+latest checkpoint up to `--steps` (the target total), and `--device cpu|cuda`
+selects the device. Checkpoints are gitignored; move them between machines with
+rsync.
+
 ## Result (first enwik8 run, 2026-06-22, d=128, 4 layers, 10000 steps)
 
 enwik8 validation bits-per-byte, against every baseline measured on the same bench:

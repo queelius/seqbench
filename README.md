@@ -102,14 +102,19 @@ docs/superpowers/   design specs and implementation plans
 
 ## Running long, and on a GPU
 
-The architectures currently train on CPU. Resumable, device-portable
-checkpointing (`--ckpt-dir`, `--resume`, `--device cuda`) is the active
-sub-project (spec: `docs/superpowers/specs/2026-06-22-resumable-checkpointing-design.md`).
-Once it lands, a long run is crash-safe and a checkpoint written on one machine
-continues on another, so the intended flow is: develop and test on CPU, run the
+Training is resumable and device-portable. `--ckpt-dir` writes a rolling
+`latest` plus `best` checkpoint set, `--resume` continues to the `--steps`
+target, and `--device cuda` runs on a GPU. A checkpoint written on one machine
+loads on another, so the intended flow is: develop and test on CPU, run the
 heavy training on a GPU box that `git pull`s the code and points its
-`CMAKE_PREFIX_PATH` at a CUDA libtorch. Checkpoints are gitignored and moved
-between machines with rsync, not committed.
+`CMAKE_PREFIX_PATH` at a CUDA libtorch:
+
+```bash
+./arch/deltanet/build/train_deltanet --corpus data/enwik8 --d 128 --n-layers 4 \
+  --steps 44000 --device cuda --ckpt-dir runs/ckpt/deltanet-asymptote --ckpt-every 2000
+```
+
+Checkpoints are gitignored and moved between machines with rsync, not committed.
 
 ## License
 

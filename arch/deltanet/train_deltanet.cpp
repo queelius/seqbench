@@ -35,6 +35,9 @@ int main(int argc, char** argv) {
     else if (a == "--task") rc.task = need("--task");
     else if (a == "--block-len") rc.block_len = std::atoi(need("--block-len"));
     else if (a == "--device") rc.device = need("--device");
+    else if (a == "--ckpt-dir") rc.ckpt_dir = need("--ckpt-dir");
+    else if (a == "--ckpt-every") rc.ckpt_every = std::atoi(need("--ckpt-every"));
+    else if (a == "--resume") rc.resume = true;
     else if (a == "--out") rc.out = need("--out");
     else { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); return 2; }
   }
