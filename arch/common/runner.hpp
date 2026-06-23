@@ -21,6 +21,7 @@ struct RunConfig {
   uint64_t seed = 1;
   std::string corpus = "data/enwik8", task = "enwik8", out = "runs/results.jsonl";
   int block_len = 16, dict_size = 16, key_len = 4;  // task generator params
+  std::string device = "cpu";  // "cpu" or "cuda"
 };
 
 inline seqbench::ByteSpan slice(seqbench::ByteSpan s, double lo, double hi) {
@@ -61,6 +62,8 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
   using namespace seqbench;
   torch::manual_seed(static_cast<int64_t>(rc.seed));
   std::mt19937_64 rng(rc.seed);
+  torch::Device dev(rc.device == "cuda" ? torch::kCUDA : torch::kCPU);
+  model->to(dev);
 
   const bool is_task = (rc.task == "parity" || rc.task == "induction");
 
@@ -96,7 +99,7 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
   auto eval_val_bpb = [&]() -> double {
     torch::NoGradGuard ng; model->eval();
     double tot = 0.0;
-    for (auto& vb : val_set) tot += loss_fn(model, vb).item().toDouble();
+    for (auto& vb : val_set) tot += loss_fn(model, vb.to(dev)).item().toDouble();
     model->train();
     return tot / val_set.size();
   };
@@ -105,7 +108,7 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
   double best = std::numeric_limits<double>::infinity();
   for (int step = 1; step <= rc.steps; ++step) {
     model->train();
-    auto xb = train_batch(rng);
+    auto xb = train_batch(rng).to(dev);
     opt.zero_grad();
     auto loss = loss_fn(model, xb);
     loss.backward();
@@ -122,7 +125,7 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
 
   double train_bpb;
   { torch::NoGradGuard ng; model->eval();
-    train_bpb = loss_fn(model, train_batch(rng)).item().toDouble(); }
+    train_bpb = loss_fn(model, train_batch(rng).to(dev)).item().toDouble(); }
 
   RunRecord rec;
   rec.arch = arch;

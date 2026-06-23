@@ -33,6 +33,7 @@ int main(int argc, char** argv) {
     else if (a == "--seed") rc.seed = std::strtoull(need("--seed"), nullptr, 10);
     else if (a == "--corpus") rc.corpus = need("--corpus");
     else if (a == "--task") rc.task = need("--task");
+    else if (a == "--device") rc.device = need("--device");
     else if (a == "--out") rc.out = need("--out");
     else { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); return 2; }
   }
