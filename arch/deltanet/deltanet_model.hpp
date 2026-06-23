@@ -19,6 +19,7 @@ struct FWMixImpl : torch::nn::Module {
   torch::nn::Linear wk{nullptr}, wv{nullptr}, wq{nullptr}, wbeta{nullptr}, wo{nullptr};
   FWMixImpl(int d, double lam);
   torch::Tensor forward(torch::Tensor h);  // [B,T,d] -> [B,T,d]
+  torch::Tensor step(torch::Tensor& W, torch::Tensor x);  // W:[B,d,d] mutated, x:[B,d] -> o:[B,d]
 };
 TORCH_MODULE(FWMix);
 
