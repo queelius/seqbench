@@ -9,8 +9,11 @@
 /tools/bench
 /tools/sweep_cli
 
-# libtorch CMake build dir for the learned fast-weights model
-/arch/fast-weights/build/
+# libtorch CMake build dirs (one per architecture under arch/)
+/arch/*/build/
+
+# Training checkpoints (large binary blobs; moved between machines via rsync, not git)
+/runs/ckpt/
 
 # Fetched corpus (large; not checked in)
 /data/
