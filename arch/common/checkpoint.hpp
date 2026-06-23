@@ -2,6 +2,7 @@
 #include <torch/torch.h>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <random>
@@ -69,9 +70,16 @@ void save_checkpoint(const std::string& dir, const std::string& prefix,
   // .meta written LAST: its presence marks the checkpoint set as valid.
   atomic_write(base + ".meta", [&](const std::string& p) {
     std::ofstream f(p);
+    // `best` is serialized as its raw IEEE-754 bits (a uint64) so any double,
+    // including +inf (its pre-first-eval sentinel), nan, and denormals, round
+    // trips exactly and is always parseable. Writing the decimal form would
+    // emit "inf", which std::ifstream cannot parse, aborting the parse loop and
+    // dropping the fields written after it.
+    uint64_t best_bits;
+    std::memcpy(&best_bits, &meta.best, sizeof(best_bits));
     f << "step " << meta.step << "\n"
       << "seed " << meta.seed << "\n"
-      << "best " << std::setprecision(17) << meta.best << "\n"
+      << "best " << best_bits << "\n"
       << "arch " << meta.arch << "\n"
       << "fingerprint " << meta.fingerprint << "\n";
   });
@@ -91,7 +99,10 @@ bool load_checkpoint(const std::string& dir, const std::string& prefix,
     while (f >> key) {
       if (key == "step") f >> meta.step;
       else if (key == "seed") f >> meta.seed;
-      else if (key == "best") f >> meta.best;
+      else if (key == "best") {
+        uint64_t best_bits; f >> best_bits;
+        std::memcpy(&meta.best, &best_bits, sizeof(meta.best));
+      }
       else if (key == "arch") f >> meta.arch;
       else if (key == "fingerprint") f >> meta.fingerprint;
     }

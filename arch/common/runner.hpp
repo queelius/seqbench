@@ -172,7 +172,13 @@ int run_experiment(const RunConfig& rc, const std::string& arch, const std::stri
   if (best < std::numeric_limits<double>::infinity()) {
     if (ckpt_on) {
       archcommon::CkptMeta m; std::mt19937_64 tmp;
-      archcommon::load_checkpoint(rc.ckpt_dir, "best", model, opt, m, tmp, dev);
+      // `best` may be finite because it was carried over from latest.meta on a
+      // resume, while the best.* files were never copied to this machine (e.g.
+      // only latest.* was rsync'd). load_checkpoint then returns false and
+      // loads nothing, so warn rather than silently report last-step weights.
+      if (!archcommon::load_checkpoint(rc.ckpt_dir, "best", model, opt, m, tmp, dev))
+        std::fprintf(stderr, "warning: best checkpoint absent in %s; reporting current weights\n",
+                     rc.ckpt_dir.c_str());
     } else {
       torch::load(model, fallback_best);
     }

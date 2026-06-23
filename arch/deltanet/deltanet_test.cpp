@@ -122,11 +122,74 @@ static void test_run_experiment_resume() {
   CHECK(m2.step == 8);
 }
 
+// Shared driver for the run_experiment coverage tests below. Trains a tiny
+// deltanet on the toy corpus with seq_len 16 so the toy corpus fits. `d` varies
+// the model width (and hence the fingerprint); `ckpt` "" exercises the /tmp
+// fallback path.
+static int run_toy(const std::string& ckpt, int d, int steps, bool resume,
+                   const std::string& out) {
+  archcommon::RunConfig rc;
+  rc.corpus = "toy"; rc.seq_len = 16; rc.batch = 2; rc.steps = steps;
+  rc.eval_every = 2; rc.ckpt_dir = ckpt; rc.ckpt_every = 2; rc.resume = resume;
+  rc.out = out;
+  dn::Config cfg; cfg.d = d; cfg.n_layers = 1;
+  std::map<std::string, seqbench::JsonValue> config;
+  config["d"] = seqbench::JsonValue::n(cfg.d);
+  config["n_layers"] = seqbench::JsonValue::n(cfg.n_layers);
+  config["lambda"] = seqbench::JsonValue::n(cfg.lambda);
+  dn::DeltaNet model(cfg);
+  return archcommon::run_experiment<dn::DeltaNet>(
+      rc, "deltanet", "test", config, model,
+      [](dn::DeltaNet& m, torch::Tensor x) { return dn::bpb_loss(m, x); },
+      [cfg](dn::DeltaNet& m) {
+        return std::unique_ptr<seqbench::Model>(new dn::DeltaNetEval(m, cfg));
+      });
+}
+
+static int read_latest_step(const std::string& ckpt) {
+  archcommon::CkptMeta m; std::ifstream f(ckpt + "/latest.meta"); std::string k;
+  while (f >> k) { if (k == "step") { f >> m.step; break; } }
+  return m.step;
+}
+
+// A resume into a structurally different model (different fingerprint) must be
+// rejected with exit code 2, leaving the existing checkpoint untouched.
+static void test_run_experiment_fingerprint_mismatch() {
+  const std::string ckpt = "/tmp/sb_runexp_fpmismatch";
+  if (std::system(("rm -rf " + ckpt).c_str()) != 0) { /* best-effort cleanup */ }
+  CHECK(run_toy(ckpt, 16, 4, false, "/tmp/sb_runexp_fpmismatch.jsonl") == 0);
+  CHECK(archcommon::checkpoint_exists(ckpt, "latest"));
+  // Same ckpt dir, resume requested, but d=32 makes a different fingerprint.
+  CHECK(run_toy(ckpt, 32, 4, true, "/tmp/sb_runexp_fpmismatch.jsonl") == 2);
+}
+
+// Resuming a run whose target step count is already met runs the loop zero
+// times but still completes (returns 0) and leaves latest.meta at the reached
+// step.
+static void test_run_experiment_noop_resume() {
+  const std::string ckpt = "/tmp/sb_runexp_noop";
+  if (std::system(("rm -rf " + ckpt).c_str()) != 0) { /* best-effort cleanup */ }
+  CHECK(run_toy(ckpt, 16, 4, false, "/tmp/sb_runexp_noop.jsonl") == 0);
+  CHECK(read_latest_step(ckpt) == 4);
+  // Resume to the same target: nothing left to do.
+  CHECK(run_toy(ckpt, 16, 4, true, "/tmp/sb_runexp_noop.jsonl") == 0);
+  CHECK(read_latest_step(ckpt) == 4);
+}
+
+// With ckpt_dir empty, checkpointing is off and the best model is saved to and
+// restored from /tmp/seqbench_best.pt. The run must still complete (returns 0).
+static void test_run_experiment_tmp_fallback() {
+  CHECK(run_toy("", 16, 4, false, "/tmp/sb_runexp_tmpfallback.jsonl") == 0);
+}
+
 int main() {
   RUN(test_forward_shape_finite);
   RUN(test_deterministic);
   RUN(test_overfit_tiny);
   RUN(test_train_eval_consistency);
   RUN(test_run_experiment_resume);
+  RUN(test_run_experiment_fingerprint_mismatch);
+  RUN(test_run_experiment_noop_resume);
+  RUN(test_run_experiment_tmp_fallback);
   return test_summary();
 }

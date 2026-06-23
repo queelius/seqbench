@@ -3,7 +3,9 @@
 #include "common/checkpoint.hpp"
 #include "common/runner.hpp"  // archcommon::sample_batch
 #include "seqbench/byte_span.hpp"
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <random>
 #include <vector>
 
@@ -100,7 +102,7 @@ static void test_rng_restore() {
   CHECK(torch::equal(got_torch, expect_torch));
 }
 
-static void test_fingerprint_rejection() {
+static void test_fingerprint_roundtrip() {
   torch::manual_seed(1);
   Tiny model(8);
   torch::optim::Adam opt(model->parameters(), torch::optim::AdamOptions(1e-2));
@@ -114,9 +116,36 @@ static void test_fingerprint_rejection() {
   bool ok = archcommon::load_checkpoint("/tmp/sb_ckpt_fp", "latest", model, opt, got, rng2,
                                         torch::kCPU);
   CHECK(ok);
-  // The caller decides rejection by comparing the loaded fingerprint:
+  // The stored fingerprint round-trips verbatim; the caller decides rejection by
+  // comparing it (the real rejection path is covered end-to-end by
+  // test_run_experiment_fingerprint_mismatch in deltanet_test.cpp).
   CHECK(got.fingerprint == "tiny|d=128");
   CHECK(got.fingerprint != "tiny|d=64");
+}
+
+// Regression: `best` starts as +infinity (its pre-first-eval sentinel). The
+// decimal form emits "inf", which std::ifstream cannot parse, which would abort
+// the parse loop and drop arch + fingerprint (both written after best). The bit
+// serialization must round-trip inf exactly AND keep the later fields readable.
+static void test_best_inf_roundtrip() {
+  torch::manual_seed(13);
+  Tiny model(8);
+  torch::optim::Adam opt(model->parameters(), torch::optim::AdamOptions(1e-2));
+  std::mt19937_64 rng(13);
+  archcommon::CkptMeta meta;
+  meta.best = std::numeric_limits<double>::infinity();
+  meta.arch = "x"; meta.fingerprint = "fp|d=128";
+  archcommon::save_checkpoint("/tmp/sb_ckpt_inf", "latest", model, opt, meta, rng);
+
+  archcommon::CkptMeta got;
+  std::mt19937_64 rng2(0);
+  bool ok = archcommon::load_checkpoint("/tmp/sb_ckpt_inf", "latest", model, opt, got, rng2,
+                                        torch::kCPU);
+  CHECK(ok);
+  CHECK(std::isinf(got.best));
+  // These two prove the fields written AFTER best survived the parse:
+  CHECK(got.arch == "x");
+  CHECK(got.fingerprint == "fp|d=128");
 }
 
 static void test_resume_determinism() {
@@ -176,7 +205,8 @@ static void test_resume_determinism() {
 int main() {
   RUN(test_roundtrip_params_and_opt);
   RUN(test_rng_restore);
-  RUN(test_fingerprint_rejection);
+  RUN(test_fingerprint_roundtrip);
+  RUN(test_best_inf_roundtrip);
   RUN(test_resume_determinism);
   return test_summary();
 }
