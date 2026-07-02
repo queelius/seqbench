@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <random>
 #include <vector>
@@ -182,6 +183,74 @@ static void test_run_experiment_tmp_fallback() {
   CHECK(run_toy("", 16, 4, false, "/tmp/sb_runexp_tmpfallback.jsonl") == 0);
 }
 
+static void test_toggles_train_and_consistent() {
+  // `trainable` marks whether the ablation is expected to train stably. Raw
+  // (unnormalized) keys make the fast-weight recurrence W*q overflow float32
+  // over a non-trivial horizon, so `no_key_norm` is unstable by construction:
+  // key normalization is load-bearing. For every toggle we still assert the
+  // drift guard (online adapter matches the batched forward on a fresh model);
+  // trainability is asserted only for the toggles that can train.
+  struct Variant { const char* name; bool trainable; std::function<void(dn::Config&)> set; };
+  std::vector<Variant> variants = {
+    {"no_gate",      true,  [](dn::Config& c) { c.use_gate = false; }},
+    {"hebbian",      true,  [](dn::Config& c) { c.use_delta = false; }},
+    {"learn_lambda", true,  [](dn::Config& c) { c.learn_lambda = true; }},
+    {"no_decay",     true,  [](dn::Config& c) { c.no_decay = true; }},
+    {"no_key_norm",  false, [](dn::Config& c) { c.normalize_keys = false; }},
+    {"no_mlp",       true,  [](dn::Config& c) { c.use_mlp = false; }},
+  };
+  for (auto& var : variants) {
+    torch::manual_seed(1);
+    dn::Config c; c.d = 24; c.n_layers = 2; var.set(c);
+    dn::DeltaNet model(c);
+    // (a) consistency (every toggle, the drift guard): on a fresh model, the
+    // batched forward bits and the online adapter bits must agree. This proves
+    // the shared step() keeps the online adapter faithful for each toggle.
+    model->eval();
+    const int U = 40;
+    std::vector<int64_t> buf2(U);
+    for (int i = 0; i < U; ++i) buf2[i] = (i * 37 + 11) % 256;
+    double train_bits = 0.0;
+    {
+      torch::NoGradGuard ng;
+      auto xx = torch::tensor(buf2, torch::kLong).reshape({1, U});
+      auto logp = torch::log_softmax(model->forward(xx).slice(1, 0, U - 1).reshape({-1, 256}), 1).contiguous();
+      auto a = logp.accessor<float, 2>();
+      for (int t = 0; t < U - 1; ++t) train_bits += -double(a[t][buf2[t + 1]]) / std::log(2.0);
+    }
+    double eval_bits = 0.0;
+    dn::DeltaNetEval ev(model, c);
+    float lg[256];
+    for (int i = 0; i < U; ++i) {
+      ev.predict(lg);
+      if (i >= 1) eval_bits += seqbench::logit_bits(lg, static_cast<uint8_t>(buf2[i]));
+      ev.observe(static_cast<uint8_t>(buf2[i]));
+    }
+    std::printf("    [toggle %s consistency train=%.4f eval=%.4f]\n", var.name, train_bits, eval_bits);
+    CHECK_NEAR(train_bits, eval_bits, 0.05 * (U - 1));
+    // (b) trainability (stable toggles only): overfit a period-3 sequence; the
+    // loss must drop well below naive 8.0, confirming the variant learns.
+    if (var.trainable) {
+      model->train();
+      const int T = 48;
+      std::vector<int64_t> buf(T);
+      for (int i = 0; i < T; ++i) buf[i] = 97 + (i % 3);
+      auto x = torch::tensor(buf, torch::kLong).reshape({1, T});
+      torch::optim::Adam opt(model->parameters(), torch::optim::AdamOptions(1e-2));
+      double last = 1e9;
+      for (int s = 0; s < 300; ++s) {
+        opt.zero_grad();
+        auto loss = dn::bpb_loss(model, x);
+        loss.backward();
+        opt.step();
+        last = loss.item<double>();
+      }
+      std::printf("    [toggle %s overfit bpb=%.4f]\n", var.name, last);
+      CHECK(last < 4.0);
+    }
+  }
+}
+
 int main() {
   RUN(test_forward_shape_finite);
   RUN(test_deterministic);
@@ -191,5 +260,6 @@ int main() {
   RUN(test_run_experiment_fingerprint_mismatch);
   RUN(test_run_experiment_noop_resume);
   RUN(test_run_experiment_tmp_fallback);
+  RUN(test_toggles_train_and_consistent);
   return test_summary();
 }

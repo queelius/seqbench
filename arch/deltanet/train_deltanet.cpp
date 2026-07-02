@@ -15,6 +15,8 @@ int main(int argc, char** argv) {
   archcommon::RunConfig rc;
   int d = 128, n_layers = 4;
   double lambda = 0.99;
+  bool no_gate = false, hebbian = false, learn_lambda = false,
+       no_decay = false, no_key_norm = false, no_mlp = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
@@ -25,6 +27,12 @@ int main(int argc, char** argv) {
     if (a == "--d") d = std::atoi(need("--d"));
     else if (a == "--n-layers") n_layers = std::atoi(need("--n-layers"));
     else if (a == "--lambda") lambda = std::atof(need("--lambda"));
+    else if (a == "--no-gate") no_gate = true;
+    else if (a == "--hebbian") hebbian = true;
+    else if (a == "--learn-lambda") learn_lambda = true;
+    else if (a == "--no-decay") no_decay = true;
+    else if (a == "--no-key-norm") no_key_norm = true;
+    else if (a == "--no-mlp") no_mlp = true;
     else if (a == "--seq-len") rc.seq_len = std::atoi(need("--seq-len"));
     else if (a == "--batch") rc.batch = std::atoi(need("--batch"));
     else if (a == "--steps") rc.steps = std::atoi(need("--steps"));
@@ -43,10 +51,22 @@ int main(int argc, char** argv) {
   }
 
   dn::Config cfg; cfg.d = d; cfg.n_layers = n_layers; cfg.lambda = lambda;
+  cfg.use_gate = !no_gate;
+  cfg.use_delta = !hebbian;
+  cfg.learn_lambda = learn_lambda;
+  cfg.no_decay = no_decay;
+  cfg.normalize_keys = !no_key_norm;
+  cfg.use_mlp = !no_mlp;
   std::map<std::string, JsonValue> config;
   config["d"] = JsonValue::n(d);
   config["n_layers"] = JsonValue::n(n_layers);
   config["lambda"] = JsonValue::n(lambda);
+  config["use_gate"] = JsonValue::n(cfg.use_gate ? 1 : 0);
+  config["use_delta"] = JsonValue::n(cfg.use_delta ? 1 : 0);
+  config["learn_lambda"] = JsonValue::n(cfg.learn_lambda ? 1 : 0);
+  config["no_decay"] = JsonValue::n(cfg.no_decay ? 1 : 0);
+  config["normalize_keys"] = JsonValue::n(cfg.normalize_keys ? 1 : 0);
+  config["use_mlp"] = JsonValue::n(cfg.use_mlp ? 1 : 0);
 
   dn::DeltaNet model(cfg);
   return archcommon::run_experiment<dn::DeltaNet>(

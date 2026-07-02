@@ -10,14 +10,22 @@ struct Config {
   int d = 128;
   int n_layers = 4;
   double lambda = 0.99;
+  bool use_gate = true;        // false: beta = 1 (no learned write gate)
+  bool use_delta = true;       // false: pure Hebbian, e = v (drop the -Wk term)
+  bool learn_lambda = false;   // true: lambda = sigmoid(per-layer param), init from `lambda`
+  bool no_decay = false;       // true: lambda = 1.0 (no forgetting; overrides learn_lambda)
+  bool normalize_keys = true;  // false: raw keys
+  bool use_mlp = true;         // false: block is mix-only (MLP sublayer skipped)
 };
 
 // Fast-weights token mixing: delta-rule recurrence with a learned write gate.
 struct FWMixImpl : torch::nn::Module {
   int dim;
   double lambda;
+  bool use_gate, use_delta, learn_lambda, no_decay, normalize_keys;
   torch::nn::Linear wk{nullptr}, wv{nullptr}, wq{nullptr}, wbeta{nullptr}, wo{nullptr};
-  FWMixImpl(int d, double lam);
+  torch::Tensor lambda_logit;  // registered only when learn_lambda
+  explicit FWMixImpl(const Config& c);
   torch::Tensor forward(torch::Tensor h);  // [B,T,d] -> [B,T,d]
   torch::Tensor step(torch::Tensor& W, torch::Tensor x);  // W:[B,d,d] mutated, x:[B,d] -> o:[B,d]
 };
@@ -25,10 +33,11 @@ TORCH_MODULE(FWMix);
 
 // Pre-norm residual block: x += FWMix(LN(x)); x += MLP(LN(x)).
 struct BlockImpl : torch::nn::Module {
+  bool use_mlp;
   torch::nn::LayerNorm ln1{nullptr}, ln2{nullptr};
   FWMix mix{nullptr};
   torch::nn::Linear fc1{nullptr}, fc2{nullptr};
-  BlockImpl(int d, double lam);
+  explicit BlockImpl(const Config& c);
   torch::Tensor forward(torch::Tensor x);  // [B,T,d] -> [B,T,d]
 };
 TORCH_MODULE(Block);
@@ -56,8 +65,8 @@ class DeltaNetEval : public seqbench::Model {
  private:
   DeltaNet model_;
   Config cfg_;
-  std::vector<torch::Tensor> W_;  // n_layers x [d, d]
-  torch::Tensor out_;             // [d] post-stack hidden
+  std::vector<torch::Tensor> W_;  // n_layers x [1,d,d]
+  torch::Tensor out_;             // [1,d] post-stack hidden
   bool seen_ = false;
 };
 

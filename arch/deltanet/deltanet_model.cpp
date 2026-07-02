@@ -7,25 +7,41 @@ namespace dn {
 
 namespace F = torch::nn::functional;
 
-FWMixImpl::FWMixImpl(int d, double lam) : dim(d), lambda(lam) {
-  wk = register_module("wk", torch::nn::Linear(torch::nn::LinearOptions(d, d).bias(false)));
-  wv = register_module("wv", torch::nn::Linear(torch::nn::LinearOptions(d, d).bias(false)));
-  wq = register_module("wq", torch::nn::Linear(torch::nn::LinearOptions(d, d).bias(false)));
-  wbeta = register_module("wbeta", torch::nn::Linear(d, 1));
-  wo = register_module("wo", torch::nn::Linear(torch::nn::LinearOptions(d, d).bias(false)));
+FWMixImpl::FWMixImpl(const Config& c)
+    : dim(c.d), lambda(c.lambda),
+      use_gate(c.use_gate), use_delta(c.use_delta), learn_lambda(c.learn_lambda),
+      no_decay(c.no_decay), normalize_keys(c.normalize_keys) {
+  wk = register_module("wk", torch::nn::Linear(torch::nn::LinearOptions(dim, dim).bias(false)));
+  wv = register_module("wv", torch::nn::Linear(torch::nn::LinearOptions(dim, dim).bias(false)));
+  wq = register_module("wq", torch::nn::Linear(torch::nn::LinearOptions(dim, dim).bias(false)));
+  wbeta = register_module("wbeta", torch::nn::Linear(dim, 1));
+  wo = register_module("wo", torch::nn::Linear(torch::nn::LinearOptions(dim, dim).bias(false)));
+  if (learn_lambda) {
+    double logit = std::log(lambda / (1.0 - lambda));  // sigmoid(logit) == lambda
+    // float32 to match the model params (a float64 tensor would error when multiplied with W).
+    lambda_logit = register_parameter("lambda_logit", torch::full({1}, logit, torch::kFloat32));
+  }
 }
 
 torch::Tensor FWMixImpl::step(torch::Tensor& W, torch::Tensor x) {
-  // x: [B,d], W: [B,d,d] mutated in place, returns o: [B,d].
-  auto k = F::normalize(wk->forward(x), F::NormalizeFuncOptions().dim(1));   // [B,d]
-  auto v = wv->forward(x);                                                   // [B,d]
-  auto q = wq->forward(x);                                                   // [B,d]
-  auto beta = torch::sigmoid(wbeta->forward(x));                            // [B,1]
-  auto Wk = torch::bmm(W, k.unsqueeze(2)).squeeze(2);                        // [B,d]
-  auto e = v - Wk;                                                           // [B,d]
-  W = lambda * W + torch::bmm((beta * e).unsqueeze(2), k.unsqueeze(1));      // [B,d,d]
-  auto o = torch::bmm(W, q.unsqueeze(2)).squeeze(2);                         // [B,d]
-  return wo->forward(o);                                                     // [B,d]
+  auto k = wk->forward(x);
+  if (normalize_keys) k = F::normalize(k, F::NormalizeFuncOptions().dim(1));
+  auto v = wv->forward(x);
+  auto q = wq->forward(x);
+  torch::Tensor beta = use_gate ? torch::sigmoid(wbeta->forward(x))
+                                : torch::ones({x.size(0), 1}, x.options());
+  auto Wk = torch::bmm(W, k.unsqueeze(2)).squeeze(2);
+  auto e = use_delta ? (v - Wk) : v;
+  auto update = torch::bmm((beta * e).unsqueeze(2), k.unsqueeze(1));  // [B,d,d]
+  if (no_decay) {
+    W = W + update;                                  // lambda = 1
+  } else if (learn_lambda) {
+    W = torch::sigmoid(lambda_logit) * W + update;   // lambda_logit broadcasts [1] over [B,d,d]
+  } else {
+    W = lambda * W + update;                         // fixed lambda
+  }
+  auto o = torch::bmm(W, q.unsqueeze(2)).squeeze(2);
+  return wo->forward(o);
 }
 
 torch::Tensor FWMixImpl::forward(torch::Tensor h) {
@@ -39,24 +55,26 @@ torch::Tensor FWMixImpl::forward(torch::Tensor h) {
   return torch::stack(outs, 1);  // [B,T,d]
 }
 
-BlockImpl::BlockImpl(int d, double lam) {
-  ln1 = register_module("ln1", torch::nn::LayerNorm(torch::nn::LayerNormOptions({d})));
-  mix = register_module("mix", FWMix(d, lam));
-  ln2 = register_module("ln2", torch::nn::LayerNorm(torch::nn::LayerNormOptions({d})));
-  fc1 = register_module("fc1", torch::nn::Linear(d, 4 * d));
-  fc2 = register_module("fc2", torch::nn::Linear(4 * d, d));
+BlockImpl::BlockImpl(const Config& c) : use_mlp(c.use_mlp) {
+  ln1 = register_module("ln1", torch::nn::LayerNorm(torch::nn::LayerNormOptions({c.d})));
+  mix = register_module("mix", FWMix(c));
+  if (use_mlp) {
+    ln2 = register_module("ln2", torch::nn::LayerNorm(torch::nn::LayerNormOptions({c.d})));
+    fc1 = register_module("fc1", torch::nn::Linear(c.d, 4 * c.d));
+    fc2 = register_module("fc2", torch::nn::Linear(4 * c.d, c.d));
+  }
 }
 
 torch::Tensor BlockImpl::forward(torch::Tensor x) {
   x = x + mix->forward(ln1->forward(x));
-  x = x + fc2->forward(torch::gelu(fc1->forward(ln2->forward(x))));
+  if (use_mlp) x = x + fc2->forward(torch::gelu(fc1->forward(ln2->forward(x))));
   return x;
 }
 
 DeltaNetImpl::DeltaNetImpl(const Config& c) : cfg(c) {
   emb = register_module("emb", torch::nn::Embedding(256, cfg.d));
   for (int i = 0; i < cfg.n_layers; ++i)
-    blocks.push_back(register_module("block" + std::to_string(i), Block(cfg.d, cfg.lambda)));
+    blocks.push_back(register_module("block" + std::to_string(i), Block(cfg)));
   ln_f = register_module("ln_f", torch::nn::LayerNorm(torch::nn::LayerNormOptions({cfg.d})));
   readout = register_module("readout", torch::nn::Linear(cfg.d, 256));
 }
@@ -99,8 +117,10 @@ void DeltaNetEval::observe(uint8_t b) {
     auto& blk = model_->blocks[i];
     auto h = blk->ln1->forward(x);              // [1,d]
     x = x + blk->mix->step(W_[i], h);           // step mutates W_[i] [1,d,d], returns [1,d]
-    auto h2 = blk->ln2->forward(x);
-    x = x + blk->fc2->forward(torch::gelu(blk->fc1->forward(h2)));
+    if (cfg_.use_mlp) {
+      auto h2 = blk->ln2->forward(x);
+      x = x + blk->fc2->forward(torch::gelu(blk->fc1->forward(h2)));
+    }
   }
   out_ = x;  // [1,d]
   seen_ = true;
